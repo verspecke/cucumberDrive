@@ -1,2 +1,2 @@
 # cucumberDrive
-All project files needed to build en program a cucumber drive.
+All project files needed to build and program a cucumber drive.

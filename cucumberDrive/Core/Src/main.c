@@ -19,7 +19,6 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "cmsis_os.h"
-#include "stdio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -42,6 +41,8 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+CAN_HandleTypeDef hcan;
+
 I2C_HandleTypeDef hi2c1;
 
 UART_HandleTypeDef huart2;
@@ -57,7 +58,14 @@ const osThreadAttr_t readData_attributes = {
 osThreadId_t transmitUARTHandle;
 const osThreadAttr_t transmitUART_attributes = {
   .name = "transmitUART",
-  .stack_size = 512 * 4,
+  .stack_size = 256 * 4,
+  .priority = (osPriority_t) osPriorityBelowNormal,
+};
+/* Definitions for transmitCAN */
+osThreadId_t transmitCANHandle;
+const osThreadAttr_t transmitCAN_attributes = {
+  .name = "transmitCAN",
+  .stack_size = 256 * 4,
   .priority = (osPriority_t) osPriorityBelowNormal,
 };
 /* USER CODE BEGIN PV */
@@ -69,8 +77,10 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_USART2_UART_Init(void);
+static void MX_CAN_Init(void);
 void StartreadData(void *argument);
 void StarttransmitUART(void *argument);
+void StarttransmitCAN(void *argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -121,8 +131,10 @@ int main(void)
   MX_GPIO_Init();
   MX_I2C1_Init();
   MX_USART2_UART_Init();
+  MX_CAN_Init();
   /* USER CODE BEGIN 2 */
-
+  HAL_CAN_Start(&hcan);
+  HAL_CAN_ActivateNotification(&hcan, CAN_IT_RX_FIFO1_MSG_PENDING);
   BME280_Config(OSRS_2, OSRS_16, OSRS_1, MODE_NORMAL, T_SB_0p5, IIR_16);
   // Initialize the BME280 sensor with oversampling and mode settings
   /* USER CODE END 2 */
@@ -153,6 +165,9 @@ int main(void)
 
   /* creation of transmitUART */
   transmitUARTHandle = osThreadNew(StarttransmitUART, NULL, &transmitUART_attributes);
+
+  /* creation of transmitCAN */
+  transmitCANHandle = osThreadNew(StarttransmitCAN, NULL, &transmitCAN_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -224,6 +239,58 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+}
+
+/**
+  * @brief CAN Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_CAN_Init(void)
+{
+
+  /* USER CODE BEGIN CAN_Init 0 */
+
+  /* USER CODE END CAN_Init 0 */
+
+  /* USER CODE BEGIN CAN_Init 1 */
+
+  /* USER CODE END CAN_Init 1 */
+  hcan.Instance = CAN;
+  hcan.Init.Prescaler = 16;
+  hcan.Init.Mode = CAN_MODE_NORMAL;
+  hcan.Init.SyncJumpWidth = CAN_SJW_1TQ;
+  hcan.Init.TimeSeg1 = CAN_BS1_1TQ;
+  hcan.Init.TimeSeg2 = CAN_BS2_1TQ;
+  hcan.Init.TimeTriggeredMode = DISABLE;
+  hcan.Init.AutoBusOff = DISABLE;
+  hcan.Init.AutoWakeUp = DISABLE;
+  hcan.Init.AutoRetransmission = DISABLE;
+  hcan.Init.ReceiveFifoLocked = DISABLE;
+  hcan.Init.TransmitFifoPriority = DISABLE;
+  if (HAL_CAN_Init(&hcan) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN CAN_Init 2 */
+
+  CAN_FilterTypeDef canfilterconfig;
+
+  canfilterconfig.FilterActivation = CAN_FILTER_ENABLE;
+  canfilterconfig.FilterBank = 10;  // which filter bank to use from the assigned ones
+  canfilterconfig.FilterFIFOAssignment = CAN_FILTER_FIFO1;
+  canfilterconfig.FilterIdHigh = 0x446<<5;
+  canfilterconfig.FilterIdLow = 0;
+  canfilterconfig.FilterMaskIdHigh = 0x446<<5;
+  canfilterconfig.FilterMaskIdLow = 0x0000;
+  canfilterconfig.FilterMode = CAN_FILTERMODE_IDMASK;
+  canfilterconfig.FilterScale = CAN_FILTERSCALE_32BIT;
+  canfilterconfig.SlaveStartFilterBank = 0;  // doesn't matter in single can controllers
+
+  HAL_CAN_ConfigFilter(&hcan, &canfilterconfig);
+
+  /* USER CODE END CAN_Init 2 */
+
 }
 
 /**
@@ -386,12 +453,46 @@ void StarttransmitUART(void *argument)
 	SensorData BME280data;
 	if (osMessageQueueGet(sensorQueueHandle, &BME280data, NULL, osWaitForever) == osOK) {
 		char tx_buffer[64];
-		int len = snprintf(tx_buffer, sizeof(tx_buffer), "T:%.2f H:%.2f\r\n", BME280data.temperature, BME280data.humidity);
+		int len = snprintf(tx_buffer, sizeof(tx_buffer), "T1:%.2f H1:%.2f\r\n", BME280data.temperature, BME280data.humidity);
 		HAL_UART_Transmit(&huart2, (uint8_t*)tx_buffer, len, 500);
 	}
-    osDelay(250); // Delay for 250 ms
+    osDelay(5000); // Delay for 5000 ms
   }
   /* USER CODE END StarttransmitUART */
+}
+
+/* USER CODE BEGIN Header_StarttransmitCAN */
+/**
+* @brief Function implementing the transmitCAN thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StarttransmitCAN */
+void StarttransmitCAN(void *argument)
+{
+  /* USER CODE BEGIN StarttransmitCAN */
+  /* Infinite loop */
+  for(;;)
+  {
+	  SensorData BME280data;
+	  CAN_TxHeaderTypeDef TxHeader;
+	  uint32_t TxMailbox;
+	  uint8_t can_data[8];
+
+	  TxHeader.DLC = 2; // 2 bytes: 1 byte temperature, 1 byte humidity
+	  TxHeader.StdId = 0x321;
+	  TxHeader.IDE = CAN_ID_STD;
+	  TxHeader.RTR = CAN_RTR_DATA;
+	  TxHeader.TransmitGlobalTime = DISABLE;
+
+	  // Example: cast float to int and clamp for CAN
+	  can_data[0] = (uint8_t)(BME280data.temperature);
+	  can_data[1] = (uint8_t)(BME280data.humidity);
+
+	  HAL_CAN_AddTxMessage(&hcan, &TxHeader, can_data, &TxMailbox);
+    osDelay(5000);
+  }
+  /* USER CODE END StarttransmitCAN */
 }
 
 /**

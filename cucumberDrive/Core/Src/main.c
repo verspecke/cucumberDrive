@@ -22,7 +22,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "BME280_STM32.h" // Include the BME280 header file for sensor functions
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -41,19 +41,14 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
-/* Definitions for LEDblink01 */
-osThreadId_t LEDblink01Handle;
-const osThreadAttr_t LEDblink01_attributes = {
-  .name = "LEDblink01",
+I2C_HandleTypeDef hi2c1;
+
+/* Definitions for readData */
+osThreadId_t readDataHandle;
+const osThreadAttr_t readData_attributes = {
+  .name = "readData",
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityNormal,
-};
-/* Definitions for LEDblink02 */
-osThreadId_t LEDblink02Handle;
-const osThreadAttr_t LEDblink02_attributes = {
-  .name = "LEDblink02",
-  .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityBelowNormal,
 };
 /* USER CODE BEGIN PV */
 
@@ -62,8 +57,8 @@ const osThreadAttr_t LEDblink02_attributes = {
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
-void StartLEDblink01(void *argument);
-void StartLEDblink02(void *argument);
+static void MX_I2C1_Init(void);
+void StartreadData(void *argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -71,6 +66,8 @@ void StartLEDblink02(void *argument);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+float Temperature, Pressure, Humidity;
 
 /* USER CODE END 0 */
 
@@ -103,7 +100,10 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
+
+  BME280_Config(OSRS_2, OSRS_16, OSRS_1, MODE_NORMAL, T_SB_0p5, IIR_16);
 
   /* USER CODE END 2 */
 
@@ -127,11 +127,8 @@ int main(void)
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
-  /* creation of LEDblink01 */
-  LEDblink01Handle = osThreadNew(StartLEDblink01, NULL, &LEDblink01_attributes);
-
-  /* creation of LEDblink02 */
-  LEDblink02Handle = osThreadNew(StartLEDblink02, NULL, &LEDblink02_attributes);
+  /* creation of readData */
+  readDataHandle = osThreadNew(StartreadData, NULL, &readData_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -165,13 +162,15 @@ void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
+  RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
 
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI|RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
+  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL9;
@@ -194,6 +193,60 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_I2C1;
+  PeriphClkInit.I2c1ClockSelection = RCC_I2C1CLKSOURCE_HSI;
+  if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
+  {
+    Error_Handler();
+  }
+}
+
+/**
+  * @brief I2C1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_I2C1_Init(void)
+{
+
+  /* USER CODE BEGIN I2C1_Init 0 */
+
+  /* USER CODE END I2C1_Init 0 */
+
+  /* USER CODE BEGIN I2C1_Init 1 */
+
+  /* USER CODE END I2C1_Init 1 */
+  hi2c1.Instance = I2C1;
+  hi2c1.Init.Timing = 0x00201D2B;
+  hi2c1.Init.OwnAddress1 = 0;
+  hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+  hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+  hi2c1.Init.OwnAddress2 = 0;
+  hi2c1.Init.OwnAddress2Masks = I2C_OA2_NOMASK;
+  hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+  hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+  if (HAL_I2C_Init(&hi2c1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Analogue filter
+  */
+  if (HAL_I2CEx_ConfigAnalogFilter(&hi2c1, I2C_ANALOGFILTER_ENABLE) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Digital filter
+  */
+  if (HAL_I2CEx_ConfigDigitalFilter(&hi2c1, 0) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN I2C1_Init 2 */
+
+  /* USER CODE END I2C1_Init 2 */
+
 }
 
 /**
@@ -211,6 +264,7 @@ static void MX_GPIO_Init(void)
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOF_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
@@ -231,44 +285,25 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE END 4 */
 
-/* USER CODE BEGIN Header_StartLEDblink01 */
+/* USER CODE BEGIN Header_StartreadData */
 /**
-  * @brief  Function implementing the LEDblink01 thread.
+  * @brief  Function implementing the readData thread.
   * @param  argument: Not used
   * @retval None
   */
-/* USER CODE END Header_StartLEDblink01 */
-void StartLEDblink01(void *argument)
+/* USER CODE END Header_StartreadData */
+void StartreadData(void *argument)
 {
   /* USER CODE BEGIN 5 */
   /* Infinite loop */
   for(;;)
   {
 	HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5); // Toggle LED on pin PA5
+	BME280_Measure(); // Measure temperature, pressure, and humidity
     osDelay(500); // Delay for 500 ms
   }
   osThreadTerminate(NULL); // Terminate the thread when done
   /* USER CODE END 5 */
-}
-
-/* USER CODE BEGIN Header_StartLEDblink02 */
-/**
-* @brief Function implementing the LEDblink02 thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_StartLEDblink02 */
-void StartLEDblink02(void *argument)
-{
-  /* USER CODE BEGIN StartLEDblink02 */
-  /* Infinite loop */
-  for(;;)
-  {
-	HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5); // Toggle LED on pin PA6
-    osDelay(600); // Delay for 600 ms
-  }
-  osThreadTerminate(NULL); // Terminate the thread when done
-  /* USER CODE END StartLEDblink02 */
 }
 
 /**

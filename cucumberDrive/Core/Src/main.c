@@ -43,12 +43,21 @@
 /* Private variables ---------------------------------------------------------*/
 I2C_HandleTypeDef hi2c1;
 
+UART_HandleTypeDef huart2;
+
 /* Definitions for readData */
 osThreadId_t readDataHandle;
 const osThreadAttr_t readData_attributes = {
   .name = "readData",
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityNormal,
+};
+/* Definitions for transmitUART */
+osThreadId_t transmitUARTHandle;
+const osThreadAttr_t transmitUART_attributes = {
+  .name = "transmitUART",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityBelowNormal,
 };
 /* USER CODE BEGIN PV */
 
@@ -58,7 +67,9 @@ const osThreadAttr_t readData_attributes = {
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_I2C1_Init(void);
+static void MX_USART2_UART_Init(void);
 void StartreadData(void *argument);
+void StarttransmitUART(void *argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -101,10 +112,11 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_I2C1_Init();
+  MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
 
   BME280_Config(OSRS_2, OSRS_16, OSRS_1, MODE_NORMAL, T_SB_0p5, IIR_16);
-
+  // Initialize the BME280 sensor with oversampling and mode settings
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -129,6 +141,9 @@ int main(void)
   /* Create the thread(s) */
   /* creation of readData */
   readDataHandle = osThreadNew(StartreadData, NULL, &readData_attributes);
+
+  /* creation of transmitUART */
+  transmitUARTHandle = osThreadNew(StarttransmitUART, NULL, &transmitUART_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -193,7 +208,8 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
-  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_I2C1;
+  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USART2|RCC_PERIPHCLK_I2C1;
+  PeriphClkInit.Usart2ClockSelection = RCC_USART2CLKSOURCE_PCLK1;
   PeriphClkInit.I2c1ClockSelection = RCC_I2C1CLKSOURCE_HSI;
   if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
   {
@@ -246,6 +262,41 @@ static void MX_I2C1_Init(void)
   /* USER CODE BEGIN I2C1_Init 2 */
 
   /* USER CODE END I2C1_Init 2 */
+
+}
+
+/**
+  * @brief USART2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART2_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART2_Init 0 */
+
+  /* USER CODE END USART2_Init 0 */
+
+  /* USER CODE BEGIN USART2_Init 1 */
+
+  /* USER CODE END USART2_Init 1 */
+  huart2.Instance = USART2;
+  huart2.Init.BaudRate = 115200;
+  huart2.Init.WordLength = UART_WORDLENGTH_8B;
+  huart2.Init.StopBits = UART_STOPBITS_1;
+  huart2.Init.Parity = UART_PARITY_NONE;
+  huart2.Init.Mode = UART_MODE_TX_RX;
+  huart2.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart2.Init.OverSampling = UART_OVERSAMPLING_16;
+  huart2.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
+  huart2.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
+  if (HAL_UART_Init(&huart2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART2_Init 2 */
+
+  /* USER CODE END USART2_Init 2 */
 
 }
 
@@ -304,6 +355,26 @@ void StartreadData(void *argument)
   }
   osThreadTerminate(NULL); // Terminate the thread when done
   /* USER CODE END 5 */
+}
+
+/* USER CODE BEGIN Header_StarttransmitUART */
+/**
+* @brief Function implementing the transmitUART thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StarttransmitUART */
+void StarttransmitUART(void *argument)
+{
+  /* USER CODE BEGIN StarttransmitUART */
+  /* Infinite loop */
+  for(;;)
+  {
+	uint8_t tx_buffer[] = "Hello from Task2\n\r";
+	HAL_UART_Transmit(&huart2, tx_buffer, sizeof(tx_buffer), 500);
+    osDelay(250); // Delay for 250 ms
+  }
+  /* USER CODE END StarttransmitUART */
 }
 
 /**

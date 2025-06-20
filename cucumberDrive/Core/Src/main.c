@@ -19,6 +19,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "cmsis_os.h"
+#include "stdio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -56,7 +57,7 @@ const osThreadAttr_t readData_attributes = {
 osThreadId_t transmitUARTHandle;
 const osThreadAttr_t transmitUART_attributes = {
   .name = "transmitUART",
-  .stack_size = 128 * 4,
+  .stack_size = 512 * 4,
   .priority = (osPriority_t) osPriorityBelowNormal,
 };
 /* USER CODE BEGIN PV */
@@ -79,6 +80,13 @@ void StarttransmitUART(void *argument);
 /* USER CODE BEGIN 0 */
 
 float Temperature, Pressure, Humidity;
+
+typedef struct {
+	float temperature;
+	float humidity;
+} SensorData;
+
+osMessageQueueId_t sensorQueueHandle;
 
 /* USER CODE END 0 */
 
@@ -136,6 +144,7 @@ int main(void)
 
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
+  sensorQueueHandle = osMessageQueueNew(8, sizeof(SensorData), NULL);
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
@@ -350,10 +359,14 @@ void StartreadData(void *argument)
   for(;;)
   {
 	HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5); // Toggle LED on pin PA5
+
 	BME280_Measure(); // Measure temperature, pressure, and humidity
+	SensorData BME280data;
+	BME280data.temperature = Temperature; // Store temperature in data structure
+	BME280data.humidity = Humidity; // Store humidity in data structure
+	osMessageQueuePut(sensorQueueHandle, &BME280data, 0, 0); // Send data to the queue
     osDelay(500); // Delay for 500 ms
   }
-  osThreadTerminate(NULL); // Terminate the thread when done
   /* USER CODE END 5 */
 }
 
@@ -370,8 +383,12 @@ void StarttransmitUART(void *argument)
   /* Infinite loop */
   for(;;)
   {
-	uint8_t tx_buffer[] = "Hello from Task2\n\r";
-	HAL_UART_Transmit(&huart2, tx_buffer, sizeof(tx_buffer), 500);
+	SensorData BME280data;
+	if (osMessageQueueGet(sensorQueueHandle, &BME280data, NULL, osWaitForever) == osOK) {
+		char tx_buffer[64];
+		int len = snprintf(tx_buffer, sizeof(tx_buffer), "T:%.2f H:%.2f\r\n", BME280data.temperature, BME280data.humidity);
+		HAL_UART_Transmit(&huart2, (uint8_t*)tx_buffer, len, 500);
+	}
     osDelay(250); // Delay for 250 ms
   }
   /* USER CODE END StarttransmitUART */
